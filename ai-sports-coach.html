@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>AI 运动评测 · 实时动作分析</title>
+<style>
+  :root{
+    --bg:#05060c; --panel:#0b1020cc; --cyan:#00f0ff; --mag:#ff2bd6;
+    --grn:#39ff14; --ylw:#ffd23f; --red:#ff4d6d; --txt:#dbeaff; --dim:#7d8bb0;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    overflow:hidden; overscroll-behavior:none;}
+  #app{display:flex;flex-direction:column;height:100%;}
+  header{display:flex;align-items:center;gap:8px;padding:8px 10px;
+    background:linear-gradient(90deg,#0a0f1f,#101a33);border-bottom:1px solid #1b2b4d;}
+  header h1{font-size:14px;margin:0;letter-spacing:1px;
+    color:var(--cyan);text-shadow:0 0 8px #00f0ff88;flex:1;white-space:nowrap;}
+  .modes{display:flex;gap:6px;}
+  .modes button{font-size:12px;padding:6px 10px;border-radius:8px;cursor:pointer;
+    border:1px solid #2a3b66;background:#0e1730;color:var(--dim);}
+  .modes button.on{color:#04121a;background:var(--cyan);border-color:var(--cyan);
+    box-shadow:0 0 10px #00f0ff99;font-weight:700;}
+  #flip{font-size:12px;padding:6px 10px;border-radius:8px;cursor:pointer;
+    border:1px solid #2a3b66;background:#0e1730;color:var(--mag);}
+  #testbar{display:none;align-items:center;gap:8px;padding:8px 10px;background:#0a0f1f;border-bottom:1px solid #1b2b4d;}
+  #testbar button{flex:1;font-size:13px;padding:10px;border-radius:10px;cursor:pointer;border:none;font-weight:700;}
+  #bStart{background:var(--grn);color:#04210a;box-shadow:0 0 12px #39ff1488;}
+  #bStop{background:#23304f;color:var(--txt);}
+  #stage{position:relative;flex:1;background:#000;overflow:hidden;min-height:0;}
+  video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;}
+  canvas{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+  #badge{position:absolute;top:8px;left:8px;font-size:12px;padding:4px 8px;border-radius:8px;
+    background:#0b1020cc;border:1px solid #2a3b66;color:var(--ylw);pointer-events:none;
+    text-shadow:0 0 6px #ffd23f66;}
+  #fps{position:absolute;top:8px;right:8px;font-size:11px;padding:3px 7px;border-radius:7px;
+    background:#0b1020cc;border:1px solid #2a3b66;color:var(--grn);pointer-events:none;}
+  #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:14px;background:#05060ccc;color:var(--cyan);font-size:14px;
+    text-shadow:0 0 8px #00f0ff66;z-index:5;}
+  .spin{width:42px;height:42px;border:3px solid #16304f;border-top-color:var(--cyan);
+    border-radius:50%;animation:sp 1s linear infinite;}
+  @keyframes sp{to{transform:rotate(360deg);}}
+  #err{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    padding:22px;background:#05060cf2;color:#ffd7e0;font-size:13px;line-height:1.7;z-index:6;}
+  #err code{color:var(--cyan);background:#0e1730;padding:1px 6px;border-radius:5px;}
+  #panel{background:var(--panel);border-top:1px solid #1b2b4d;padding:10px 10px 14px;
+    max-height:44vh;overflow:auto;backdrop-filter:blur(6px);}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px;}
+  .metric{background:#0a1124;border:1px solid #1f2f55;border-radius:10px;padding:8px 6px;text-align:center;}
+  .metric .v{font-size:20px;font-weight:800;color:var(--cyan);text-shadow:0 0 8px #00f0ff55;}
+  .metric .v.warn{color:var(--red);text-shadow:0 0 8px #ff4d6d55;}
+  .metric .v.good{color:var(--grn);text-shadow:0 0 8px #39ff1455;}
+  .metric .k{font-size:11px;color:var(--dim);margin-top:2px;}
+  #diag{background:#0a1124;border:1px solid #1f2f55;border-radius:10px;padding:10px 12px;
+    min-height:54px;font-size:13px;line-height:1.6;color:var(--txt);}
+  #diag b{color:var(--ylw);}
+  #diag .ok{color:var(--grn);} #diag .bad{color:var(--red);}
+  #log{margin-top:8px;font-size:11px;color:var(--dim);max-height:74px;overflow:auto;line-height:1.5;}
+  #log div{padding:1px 0;border-bottom:1px dashed #16223f;}
+  #controls{display:flex;gap:8px;padding:10px;background:#070b16;border-top:1px solid #14213d;}
+  #controls button{flex:1;font-size:12px;padding:11px 4px;border-radius:10px;cursor:pointer;
+    border:1px solid #2a3b66;background:#0e1730;color:var(--txt);font-weight:600;}
+  #controls button.on{color:#04121a;background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 10px #00f0ff88;}
+  #controls button.alt{color:var(--mag);}
+  /* 身体档案 + 专属报告 */
+  .ok{color:var(--grn);} .warn{color:var(--ylw);} .bad{color:var(--red);}
+  #profile{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:12px;color:var(--dim);
+    background:#0a1124;border:1px solid #1f2f55;border-radius:10px;padding:8px 10px;margin-bottom:10px;}
+  #profile label{display:flex;align-items:center;gap:4px;}
+  #profile input{width:54px;font-size:12px;padding:3px 5px;border-radius:6px;border:1px solid #2a3b66;
+    background:#0e1730;color:var(--txt);text-align:center;}
+  #profile #bmiTag{font-weight:700;}
+  #report{margin-top:8px;}
+  #report .box{background:#0a1124;border:1px solid #1f2f55;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.6;}
+  #report .box b{color:var(--ylw);}
+  #report .rec{color:var(--dim);font-size:11px;margin-top:6px;word-break:break-all;}
+  #report .pt{color:var(--txt);}
+
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🛰 AI 运动评测</h1>
+    <div class="modes">
+      <button id="mJump" onclick="setMode('jump')">立定跳远</button>
+      <button id="mSit" class="on" onclick="setMode('situp')">仰卧起坐</button>
+    </div>
+    <button id="flip" onclick="flipCam()">翻转镜头</button>
+  </header>
+
+  <div id="testbar">
+    <button id="bStart" onclick="startTest()">▶ 开始 1 分钟</button>
+    <button id="bStop" onclick="stopTest(false)">■ 停止</button>
+  </div>
+
+  <div id="stage">
+    <video id="video" playsinline autoplay muted></video>
+    <canvas id="overlay"></canvas>
+    <div id="badge">机位：识别中…</div>
+    <div id="fps">-- FPS</div>
+    <div id="loading"><div class="spin"></div><div>AI 模型加载中…<br><span style="font-size:11px;color:#7d8bb0">首次需联网下载约几 MB</span></div></div>
+    <div id="err"></div>
+  </div>
+
+  <div id="panel">
+    <div id="profile">
+      <label>身高 <input id="inpH" type="number" value="163" min="100" max="230" step="1"> cm</label>
+      <label>体重 <input id="inpW" type="number" value="90" min="30" max="200" step="1"> kg</label>
+      <span id="bmiTag">BMI --</span>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div id="diag">仰卧起坐模式：躺平后起身，系统自动计数。点「开始 1 分钟」会先有 10 秒准备缓冲，语音说「开始」后才正式计时并语音播报。</div>
+    <div id="log"></div>
+    <div id="report"></div>
+  </div>
+
+  <div id="controls">
+    <button id="bSkel" class="on" onclick="toggle('skel')">骨骼线</button>
+    <button id="bLbl" class="on" onclick="toggle('lbl')">角度标</button>
+    <button id="bPause" onclick="toggle('pause')">暂停</button>
+    <button id="bSnap" class="alt" onclick="snap()">抓拍</button>
+    <button id="bReset" class="alt" onclick="resetAll()">重置</button>
+  </div>
+</div>
+
+<script src="lib/tf.min.js"></script>
+<script src="lib/pose-detection.min.js"></script>
+<script>
+// ====== 全局状态 ======
+let detector=null, stream=null, running=true, mirror=true, facing='user';
+let mode='situp';
+let showSkeleton=true, showLabels=true, paused=false;
+let lastEvent=0, eventCount=0;
+let processing=false, frames=0, fpsT=performance.now(), fps=0;
+
+const video=document.getElementById('video');
+const canvas=document.getElementById('overlay');
+const ctx=canvas.getContext('2d');
+
+// ====== COCO 17 点骨架连线（与教程“火柴人”一致）======
+const SKELETON=[
+ [0,1],[0,2],[1,3],[2,4],
+ [5,6],[5,11],[6,12],[11,12],
+ [5,7],[7,9],[6,8],[8,10],
+ [11,13],[13,15],[12,14],[14,16]
+];
+const NAMES=['nose','left_eye','right_eye','left_ear','right_ear','left_shoulder','right_shoulder',
+ 'left_elbow','right_elbow','left_wrist','right_wrist','left_hip','right_hip','left_knee','right_knee',
+ 'left_ankle','right_ankle'];
+
+// ====== 状态机（立定跳远：蹲底->起跳）======
+let sm={phase:'idle', kneeMin:180, liftPos:null, crouchKnee:180, lastWristY:null, riseT:0, takeoffKnee:null, airHipY:0, airT:0};
+let pending=null; // 起跳后暂存，等落地补全再入 records
+let jstat={n:0,sumC:0,sumT:0,notExt:0,shallow:0};
+// ====== 身体档案 + 跳跃记录 ======
+let user={h:163,w:90};   // 身高 cm、体重 kg（默认填好，可改）
+let records=[];          // 每次有效跳跃存档：{c:蓄力角, k:起跳角, orient}
+function bmiVal(){const h=user.h/100; return Math.round((user.w/(h*h))*10)/10;}
+function renderBmi(){
+  const b=bmiVal(), el=document.getElementById('bmiTag');
+  el.textContent='BMI '+b;
+  el.className=b>=28?'bad':b>=24?'warn':'ok';
+}
+function loadProfile(){
+  try{const s=localStorage.getItem('ai_coach_profile');
+    if(s){const o=JSON.parse(s); if(o&&o.h)user.h=o.h; if(o&&o.w)user.w=o.w;}}
+  catch(e){}
+}
+function saveProfile(){
+  try{localStorage.setItem('ai_coach_profile',JSON.stringify({h:user.h,w:user.w}));}catch(e){}
+}
+function bindProfile(){
+  loadProfile();
+  const h=document.getElementById('inpH'), w=document.getElementById('inpW');
+  h.value=user.h; w.value=user.w;
+  function upd(){user.h=parseFloat(h.value)||163; user.w=parseFloat(w.value)||90; saveProfile(); renderBmi(); buildReport();}
+  h.oninput=upd; w.oninput=upd;
+  renderBmi();
+}
+// 结合 BMI、身高、累计数据，生成专属建议
+function personalTips(){
+  const bmi=bmiVal(); let out=[];
+  if(bmi>=28){
+    out.push('你体重偏重（BMI '+bmi+'），<b>膝盖承压大</b>：下蹲蓄力控制在屈膝 ≈90° 即可，<b>别超过 100° 过深</b>，保护膝关节。');
+    out.push('落地务必屈髋屈膝缓冲，体重越大越要防膝盖和脚跟冲击，别直膝砸地。');
+    out.push('摆臂是你最划算的“免费助力”——起跳时双臂由后向前上方猛摆，能弥补蹬伸力量不足，多跳 10–20cm。');
+  } else if(bmi>=24){
+    out.push('你体重略偏高，起跳蹬伸要干脆，落地注意屈膝缓冲。');
+  }
+  if(user.h<165){
+    out.push('你身高 '+user.h+'cm，相对吃亏：更要靠「充分蹬直+收腿前伸+摆臂」三件套，把每一厘米都吃满。');
+  }
+  if(jstat.n>=2){
+    if(jstat.shallow*1.0/jstat.n>=0.5) out.push('多次蓄力偏浅，先解决下蹲幅度，距离会明显提升。');
+    if(jstat.notExt*1.0/jstat.n>=0.5) out.push('多次起跳未蹬直，专门练「起跳瞬间膝盖锁直+脚尖最后蹬地」。');
+    const avgC=jstat.sumC/jstat.n, avgT=jstat.sumT/jstat.n;
+    if(avgC<90 && avgT>160) out.push('你动作框架已很标准（蓄力足+蹬直），保持稳定并多练爆发即可。');
+  }
+  if(out.length===0) out.push('继续积累几次跳跃数据，我会给出更精准的专属建议。');
+  return out;
+}
+// 基于累计数据识别“有哪些问题”（结论式清单）
+function problemList(){
+  if(records.length===0) return ['先完成几次跳跃，系统会自动诊断你的问题'];
+  const out=[];
+  const avgC=jstat.sumC/jstat.n, avgT=jstat.sumT/jstat.n;
+  if(avgC>=110) out.push('蓄力普遍偏浅（平均'+Math.round(avgC)+'°，目标≈90°）');
+  else if(avgC>=95) out.push('蓄力略浅（平均'+Math.round(avgC)+'°）');
+  if(avgT<160) out.push('起跳常未完全蹬直（平均'+Math.round(avgT)+'°）');
+  if(jstat.shallow*1.0/jstat.n>=0.5) out.push('多数跳跃下蹲不够低');
+  if(jstat.notExt*1.0/jstat.n>=0.5) out.push('多数起跳膝盖没锁直');
+  const bmi=bmiVal();
+  if(bmi>=28) out.push('体重偏大，膝盖承压高，需重点护膝与落地缓冲');
+  if(user.h<165) out.push('身高偏矮，需靠蹬伸+收腿+摆臂弥补');
+  if(out.length===0) out.push('暂未发现明显技术问题，继续保持即可');
+  return out;
+}
+function buildReport(){
+  if(mode!=='jump') return;
+  const bmi=bmiVal();
+  const bmiCls=bmi>=28?'bad':bmi>=24?'warn':'ok';
+  const bmiLab=bmi>=28?'偏重':bmi>=24?'略高':'正常';
+  let html='<div class="box">';
+  html+=`<b>📋 我的档案</b>：身高 ${user.h}cm · 体重 ${user.w}kg · BMI <span class="${bmiCls}">${bmi}（${bmiLab}）</span><br>`;
+  if(records.length){
+    const avgC=Math.round(jstat.sumC/jstat.n), avgT=Math.round(jstat.sumT/jstat.n);
+    html+=`已完成 <b>${records.length}</b> 次跳跃 · 平均蓄力 <b>${avgC}°</b> · 平均起跳 <b>${avgT}°</b>`;
+    html+='<div class="rec">'+records.map((r,i)=>'#'+ (i+1) +' 蓄'+Math.round(r.c)+'°/登'+Math.round(r.k)+'°'+(r.landingKnee!=null?('/落'+Math.round(r.landingKnee)+'°'):'')).join('　')+'</div>';
+  } else {
+    html+='还没记录，跳一次就会自动存档并分析。';
+  }
+  html+='<br><b>🔍 你的问题</b><br><span class="pt">'+problemList().map(t=>'❌ '+t).join('<br>')+'</span>';
+  html+='<br><b>✅ 怎么改</b><br><span class="pt">'+personalTips().map(t=>'· '+t).join('<br>')+'</span>';
+  html+='</div>';
+  document.getElementById('report').innerHTML=html;
+}
+
+// ====== 仰卧起坐计数 / 计时 ======
+// phase: 'idle' 待开始 | 'prep' 10秒准备缓冲 | 'run' 正式1分钟
+let sit={phase:'idle', state:'down', count:0, timer:null, left:0, prepLeft:0, bestUp:90};
+
+// ===================== 工具函数 =====================
+function toMap(kps){const m={};kps.forEach(k=>m[k.name]=k);return m;}
+function P(m,n){const p=m[n];return (p&&p.score>0.3)?p:null;}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
+function mid(a,b){if(!a||!b)return null;return {x:(a.x+b.x)/2,y:(a.y+b.y)/2,score:Math.min(a.score,b.score)};}
+function angle(a,b,c){
+  if(!a||!b||!c)return null;
+  const v1={x:a.x-b.x,y:a.y-b.y}, v2={x:c.x-b.x,y:c.y-b.y};
+  const d1=Math.hypot(v1.x,v1.y), d2=Math.hypot(v2.x,v2.y);
+  if(d1<1e-3||d2<1e-3)return null;
+  let cos=(v1.x*v2.x+v1.y*v2.y)/(d1*d2);
+  cos=Math.max(-1,Math.min(1,cos));
+  return Math.acos(cos)*180/Math.PI;
+}
+// 投篮推球偏角：举球点->出手点 向量 与竖直向上(0,-1)的夹角
+function deviation(p1,p2){
+  if(!p1||!p2)return null;
+  const dx=p2.x-p1.x, dy=p2.y-p1.y;
+  const len=Math.hypot(dx,dy); if(len<1e-3)return null;
+  let cos=(-dy)/len; cos=Math.max(-1,Math.min(1,cos));
+  return Math.acos(cos)*180/Math.PI;
+}
+// 起身角：肩-髋向量 与竖直向上的夹角（躺平≈90°，坐直≈0°）
+function torsoUpAngle(ms,mh){
+  if(!ms||!mh)return null;
+  const dx=ms.x-mh.x, dy=ms.y-mh.y, len=Math.hypot(dx,dy);
+  if(len<1e-3)return null;
+  let cos=(-dy)/len; cos=Math.max(-1,Math.min(1,cos));
+  return Math.acos(cos)*180/Math.PI;
+}
+
+// ===================== 机位侦察员 =====================
+function detectOrient(m){
+  const ls=P(m,'left_shoulder'),rs=P(m,'right_shoulder'),lh=P(m,'left_hip'),rh=P(m,'right_hip');
+  const nose=P(m,'nose'),le=P(m,'left_eye'),re=P(m,'right_eye');
+  if(!ls||!rs||!lh||!rh)return '识别中…';
+  const sw=dist(ls,rs);
+  const torso=dist(mid(ls,rs),mid(lh,rh));
+  const ratio=sw/torso;
+  const face=(nose&&nose.score>0.3)&&((le&&le.score>0.3)||(re&&re.score>0.3));
+  if(ratio>0.55){ return face?'正面':'背面'; }
+  return '侧面';
+}
+
+// ===================== 语音播报 =====================
+function speak(t){
+  if(!('speechSynthesis' in window))return;
+  try{ window.speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(t); u.lang='zh-CN'; u.rate=1.05; u.pitch=1;
+    window.speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+// ===================== 计时 / 计数 =====================
+function startTest(){
+  if(mode!=='situp') setMode('situp');
+  if(sit.phase!=='idle') return;          // 准备中或测试中不可重复开始
+  sit.count=0; sit.state='down'; sit.bestUp=90; sit.left=60;
+  document.getElementById('log').innerHTML='';
+  // —— 10 秒准备缓冲期 ——
+  sit.phase='prep'; sit.prepLeft=10;
+  speak('请准备，十秒后开始');
+  updateSitUI();
+  sit.timer=setInterval(()=>{
+    sit.prepLeft--;
+    if(sit.prepLeft<=5 && sit.prepLeft>0) speak(String(sit.prepLeft)); // 最后5秒逐秒提示
+    if(sit.prepLeft===0){
+      clearInterval(sit.timer); sit.timer=null;
+      speak('开始');          // 缓冲结束，语音宣布开始
+      beginRun();
+    }
+  },1000);
+}
+function beginRun(){
+  sit.phase='run'; sit.state='down'; sit.left=60;
+  updateSitUI();
+  sit.timer=setInterval(()=>{
+    sit.left--;
+    if(sit.left===30) speak('还剩三十秒');
+    else if(sit.left<=10 && sit.left>0) speak(String(sit.left));
+    else if(sit.left===0){ speak('时间到，共'+sit.count+'个'); stopTest(true); return; }
+    updateSitUI();
+  },1000);
+}
+function stopTest(done){
+  sit.phase='idle';
+  if(sit.timer){clearInterval(sit.timer);sit.timer=null;}
+  if(!done) speak('已停止');
+  updateSitUI();
+}
+function updateSitUI(){
+  setM('mv2', sit.count, sit.count>0?'good':'');
+  if(sit.phase==='prep') setM('mv3', sit.prepLeft, 'warn');
+  else setM('mv3', sit.phase==='run'? sit.left : '--', sit.left<=10&&sit.phase==='run'?'warn':'');
+}
+
+// ===================== 主分析（分模式）=====================
+function analyze(m){
+  const orient=detectOrient(m);
+  document.getElementById('badge').textContent='机位：'+orient;
+  if(mode==='situp') analyzeSitup(m,orient);
+  else analyzeJump(m,orient);
+}
+
+function analyzeJump(m,orient){
+  setM('mv0', orient==='识别中…'?'--':orient, '');
+  const mhip=mid(P(m,'left_hip'),P(m,'right_hip'));
+  const armR=P(m,'right_shoulder')&&P(m,'right_elbow')&&P(m,'right_wrist');
+  const armL=P(m,'left_shoulder')&&P(m,'left_elbow')&&P(m,'left_wrist');
+  const useR=(armR&&(!armL||(P(m,'right_wrist').score>=P(m,'left_wrist').score)));
+  const sK=useR?'right_shoulder':'left_shoulder', eK=useR?'right_elbow':'left_elbow', wK=useR?'right_wrist':'left_wrist';
+  const legR=P(m,'right_hip')&&P(m,'right_knee')&&P(m,'right_ankle');
+  const legL=P(m,'left_hip')&&P(m,'left_knee')&&P(m,'left_ankle');
+  const useRL=(legR&&(!legL||(P(m,'right_knee').score>=P(m,'left_knee').score)));
+  const hK=useRL?'right_hip':'left_hip', kK=useRL?'right_knee':'left_knee', aK=useRL?'right_ankle':'left_ankle';
+  const elbow=angle(P(m,sK),P(m,eK),P(m,wK));
+  const wrist=P(m,wK);
+  const knee=angle(P(m,hK),P(m,kK),P(m,aK));
+  const hip=angle(P(m,sK),P(m,hK),P(m,kK));
+  setM('mv1', knee, knee!=null?(knee<90?'good':knee>110?'warn':''):'');
+  setM('mv2', hip, '');
+  setM('mv3', sm.takeoffKnee, sm.takeoffKnee!=null?(sm.takeoffKnee>160?'good':''):'');
+  setM('mv4', sm.crouchKnee, sm.crouchKnee!=null?(sm.crouchKnee<90?'good':sm.crouchKnee>110?'warn':''):'');
+  setM('mv5', eventCount, '');
+
+  if(knee!=null){
+    if(sm.phase==='idle'||sm.phase==='rise'){
+      if(knee<sm.kneeMin)sm.kneeMin=knee;
+      if(knee<100){sm.phase='crouch';sm.crouchKnee=knee;sm.kneeMin=Math.min(sm.kneeMin,knee);}
+    }
+    if(sm.phase==='crouch'){
+      sm.crouchKnee=knee; sm.kneeMin=Math.min(sm.kneeMin,knee);
+      if(knee>115){
+        sm.phase='rise'; sm.liftPos=wrist?{x:wrist.x,y:wrist.y}:null;
+        sm.lastWristY=wrist?wrist.y:null; sm.riseT=performance.now();
+      }
+    }
+    if(sm.phase==='rise'&&wrist){
+      const vy=wrist.y-(sm.lastWristY??wrist.y);
+      if(vy>=0 && sm.liftPos && (sm.liftPos.y-wrist.y)<-8){
+        sm.takeoffKnee=knee;
+        onEvent({elbow,knee,hip,orient,crouch:sm.crouchKnee});
+        sm.phase='air'; sm.airHipY=(mhip?mhip.y:wrist.y); sm.airT=performance.now();
+        sm.kneeMin=180; sm.liftPos=null;
+      }
+      sm.lastWristY=wrist.y;
+      if(performance.now()-sm.riseT>2500){sm.phase='idle';sm.kneeMin=180;sm.liftPos=null;}
+    }
+    if(sm.phase==='crouch' && knee>150){sm.phase='idle';sm.kneeMin=180;}
+    if(sm.phase==='air'){
+      // 落地检测：髋明显下落（回到/低于起跳高度）且膝盖弯出缓冲
+      if(mhip && mhip.y > sm.airHipY + 22 && knee!=null && knee<150){
+        onLand(knee,orient); sm.phase='idle'; sm.kneeMin=180; sm.liftPos=null;
+      } else if(performance.now()-sm.airT>3500){
+        onLand(null,orient); sm.phase='idle'; sm.kneeMin=180; sm.liftPos=null; // 超时兜底：未捕到落地也结算
+      }
+    }
+  }
+  diagLiveJump(knee,hip,orient);
+}
+
+function analyzeSitup(m,orient){
+  setM('mv0', orient==='识别中…'?'--':orient, '');
+  const ms=mid(P(m,'left_shoulder'),P(m,'right_shoulder'));
+  const mh=mid(P(m,'left_hip'),P(m,'right_hip'));
+  const tu=torsoUpAngle(ms,mh);
+  if(tu!=null){ if(tu<sit.bestUp)sit.bestUp=tu; }
+  setM('mv1', tu, tu!=null?(tu<30?'good':tu>55?'warn':''):'');
+  setM('mv5', sit.bestUp<90?Math.round(sit.bestUp):'--', sit.bestUp<25?'good':'');
+  updateSitUI();
+
+  if(sit.phase==='run' && tu!=null){
+    if(sit.state==='down' && tu<30){
+      sit.state='up'; sit.count++; updateSitUI();
+      if(sit.count%10===0) speak('已'+sit.count+'个');
+      const t=new Date().toLocaleTimeString();
+      document.getElementById('log').insertAdjacentHTML('afterbegin',`<div>[${t}] 第 ${sit.count} 个 · 起身角 ${Math.round(tu)}°</div>`);
+    } else if(sit.state==='up' && tu>55){
+      sit.state='down';
+    }
+  }
+  // 状态文字
+  let st = tu==null?'--':(tu>55?'躺平':tu>30?'起身中':'坐起 ✅');
+  setM('mv4', st, tu!=null&&tu<30?'good':'');
+
+  // 诊断
+  if(performance.now()-lastEvent<1500 && mode==='jump') return;
+  if(sit.phase==='prep'){
+    document.getElementById('diag').innerHTML=`⏳ <b>准备中：还有 ${sit.prepLeft} 秒开始</b><br>利用这段时间平躺好，让肩、髋都进入画面，准备起身。`;
+  } else if(sit.phase==='run'){
+    const tuTxt=tu==null?'--':Math.round(tu)+'°';
+    document.getElementById('diag').innerHTML=`进行中：已 <b>${sit.count}</b> 个，剩余 <b>${sit.left}</b> 秒。<br>当前起身角 ${tuTxt}（越小越接近垂直坐直）。${tu!=null&&tu<30?'<span class="ok">动作到位 ✅</span>':tu!=null&&tu>55?'<span class="bad">请起身坐直再躺下</span>':''}`;
+  } else {
+    document.getElementById('diag').innerHTML='仰卧起坐模式：平躺让肩、髋入镜，起身坐直即可自动计数。<br>点上方 <b>开始 1 分钟</b>：先有 10 秒准备缓冲，语音说「开始」后才正式计时并语音播报。';
+  }
+}
+
+function onEvent(info){
+  const now=performance.now();
+  if(now-lastEvent<1200)return;
+  lastEvent=now; eventCount++;
+  setM('mv5', eventCount, '');
+  const c=info.crouch, k=info.knee;
+  const crouchTxt=c==null?'—':(c<80?'<span class="ok">蓄力好 ✅</span>':c<110?'一般':'<span class="bad">偏浅 ⚠️</span>');
+  const extTxt=k==null?'—':(k>160?'<span class="ok">蹬直 ✅</span>':'<span class="bad">未蹬直 ⚠️</span>');
+  if(c!=null){ jstat.n++; jstat.sumC+=c; jstat.sumT+=(k||0); if(c>=110)jstat.shallow++; if(k!=null&&k<160)jstat.notExt++; }
+  // —— 针对性改进建议 ——
+  let tips=[];
+  if(c!=null){
+    if(c>=110) tips.push('下蹲再低一点（目标屈膝≈90°），蓄力更充分');
+    else if(c<70) tips.push('下蹲已到位，别过深影响起身，≈90° 最佳');
+  }
+  if(k!=null && k<160) tips.push('起跳瞬间把膝盖完全蹬直、脚尖最后发力，没蹬直会损失距离');
+  tips.push('起跳配合双臂由后向前上方猛摆，能多跳 10–20cm');
+  tips.push('身体略前倾，朝前上方起跳，别后仰');
+  tips.push('侧身对准镜头，屈膝和蹬伸角度看得更准');
+  const avgC=jstat.n?Math.round(jstat.sumC/jstat.n):'—';
+  const avgT=jstat.n?Math.round(jstat.sumT/jstat.n):'—';
+  document.getElementById('diag').innerHTML=
+    `🏃 <b>第 ${eventCount} 跳 · 抓拍评价</b><br>
+     蓄力屈膝 <b>${f(c)}°</b> ${crouchTxt}　起跳膝角 <b>${f(k)}°</b> ${extTxt}<br>
+     机位：<b>${info.orient}</b><br>
+     <b>怎么跳更好：</b><br>` + tips.map(t=>'· '+t).join('<br>') +
+    `<br><span style="color:#7d8bb0">累计 ${jstat.n} 跳 · 平均蓄力 ${avgC}° · 平均起跳 ${avgT}°</span>`;
+  const log=document.getElementById('log');
+  const t=new Date().toLocaleTimeString();
+  log.insertAdjacentHTML('afterbegin',`<div>[${t}] 跳远 #${eventCount} 起跳（腾空中…）</div>`);
+  pending={c,k,orient:info.orient,landingKnee:null};
+}
+
+function onLand(knee,orient){
+  lastEvent=performance.now(); // 让落地评价卡优先显示
+  if(pending){
+    pending.landingKnee=knee;
+    records.push(pending);
+    const idx=records.length;
+    const t=new Date().toLocaleTimeString();
+    const lg=document.getElementById('log');
+    lg.insertAdjacentHTML('afterbegin',`<div>[${t}] 跳远 #${idx} 蓄力${f(pending.c)}° 起跳${f(pending.k)}° ${knee!=null?('落地'+Math.round(knee)+'°'):'(未捕到落地)'}</div>`);
+    pending=null;
+    buildReport();
+  }
+  const kt=knee==null?'—':Math.round(knee)+'°';
+  document.getElementById('diag').innerHTML=
+    `🪂 <b>落地分析</b><br>落地缓冲膝角 <b>${kt}</b>${knee==null?'（未在画面内捕到落地，可能跳出镜头）':(knee<120?'<span class="ok">屈膝缓冲好 ✅</span>':knee<150?'<span class="warn">缓冲一般</span>':'<span class="bad">近乎直膝落地 ⚠️</span>')}<br>
+     <b>落地 + 收腿要领：</b><br>
+     · 腾空时<b>收腹、双腿向前伸、脚尖勾起</b>，把脚落点尽量推远；<br>
+     · 落地瞬间<b>屈膝屈髋缓冲</b>，别直膝砸地（你体重偏大，更要注意护膝）；<br>
+     · 手臂顺势后摆保持平衡，避免坐倒或后仰。`;
+}
+
+function diagLiveJump(knee,hip,orient){
+  if(performance.now()-lastEvent<1500)return;
+  let s='把身体完整放进画面。';
+  if(orient==='识别中…')s='请退后一点，让肩、髋、膝都进入画面。';
+  else if(knee!=null&&knee<100)s='正在下蹲蓄力…准备起跳。';
+  else if(knee!=null&&knee>=110)s='可以再蹲低一点，蓄力更充分。';
+  if(orient==='背面')s+='（背面拍摄也能分析，看不到脸属正常）';
+  document.getElementById('diag').innerHTML=s;
+}
+
+function f(v){return v==null?'—':Math.round(v);}
+function setM(id,v,cls){
+  const el=document.getElementById(id); if(!el)return;
+  el.textContent=(v==null?'--':v);
+  el.className='v'+(cls?(' '+cls):'');
+}
+
+// ===================== 绘制（透明画板叠加）=====================
+function draw(m,sx,sy){
+  if(showSkeleton){
+    ctx.lineWidth=3; ctx.strokeStyle='#00f0ff'; ctx.shadowColor='#00f0ff'; ctx.shadowBlur=8;
+    SKELETON.forEach(([a,b])=>{
+      const pa=m[NAMES[a]],pb=m[NAMES[b]];
+      if(pa&&pb&&pa.score>0.3&&pb.score>0.3){
+        ctx.beginPath();ctx.moveTo(pa.x*sx,pa.y*sy);ctx.lineTo(pb.x*sx,pb.y*sy);ctx.stroke();
+      }
+    });
+    ctx.fillStyle='#ff2bd6';ctx.shadowColor='#ff2bd6';
+    for(const n of NAMES){const p=m[n];if(p&&p.score>0.3){ctx.beginPath();ctx.arc(p.x*sx,p.y*sy,3.5,0,7);ctx.fill();}}
+    ctx.shadowBlur=0;
+  }
+  if(showLabels){
+    ctx.font='bold 13px sans-serif';ctx.shadowColor='#000';ctx.shadowBlur=3;
+    const legR=P(m,'right_hip')&&P(m,'right_knee')&&P(m,'right_ankle');
+    const legL=P(m,'left_hip')&&P(m,'left_knee')&&P(m,'left_ankle');
+    const useRL=(legR&&(!legL||(P(m,'right_knee').score>=P(m,'left_knee').score)));
+    const lk=useRL?'right_knee':'left_knee', lh=useRL?'right_hip':'left_hip', la=useRL?'right_ankle':'left_ankle';
+    const k=angle(P(m,lh),P(m,lk),P(m,la));
+    if(k!=null)tag(m[lk],k,sx,sy);
+    if(mode==='situp'){
+      const ms=mid(P(m,'left_shoulder'),P(m,'right_shoulder'));
+      const mh=mid(P(m,'left_hip'),P(m,'right_hip'));
+      const tu=torsoUpAngle(ms,mh);
+      if(tu!=null&&ms)tag(ms,tu,sx,sy);
+    }
+    ctx.shadowBlur=0;
+  }
+}
+function tag(p,val,sx,sy){
+  if(!p)return;
+  ctx.fillStyle='rgba(5,10,20,.75)';
+  const tx=p.x*sx+10, ty=p.y*sy-10;
+  ctx.fillRect(tx-2,ty-13,46,18);
+  ctx.fillStyle='#ffd23f'; ctx.fillText(Math.round(val)+'°',tx,ty);
+}
+
+// ===================== 主循环 =====================
+async function loop(){
+  if(!processing&&video.readyState>=2&&detector){
+    processing=true;
+    try{
+      const poses=await detector.estimatePoses(video,{flipHorizontal:false});
+      const W=canvas.width,H=canvas.height;
+      const sx=W/(video.videoWidth||W), sy=H/(video.videoHeight||H);
+      ctx.clearRect(0,0,W,H);
+      if(mirror){ctx.save();ctx.translate(W,0);ctx.scale(-1,1);}
+      if(poses&&poses.length){
+        const m=toMap(poses[0].keypoints);
+        if(!paused)analyze(m);
+        draw(m,sx,sy);
+      }
+      if(mirror)ctx.restore();
+      frames++;
+      const now=performance.now();
+      if(now-fpsT>500){fps=Math.round(frames*1000/(now-fpsT));frames=0;fpsT=now;
+        document.getElementById('fps').textContent=fps+' FPS';}
+    }catch(e){console.warn(e);}
+    processing=false;
+  }
+  requestAnimationFrame(loop);
+}
+
+// ===================== 初始化 =====================
+async function init(){
+  const errBox=document.getElementById('err');
+  function showErr(msg){document.getElementById('loading').style.display='none';errBox.style.display='flex';errBox.innerHTML=msg;}
+  if(!window.isSecureContext){
+    showErr('⚠️ 当前打开方式不支持调用摄像头。<br>手机请用 <code>https://</code> 链接打开（如 GitHub Pages）。直接双击文件用 <code>file://</code> 打开时，浏览器会禁止摄像头。');
+    return;
+  }
+  try{
+    await tf.setBackend('webgl'); await tf.ready();
+    detector=await poseDetection.createDetector(
+      poseDetection.SupportedModels.MoveNet,
+      {modelType:poseDetection.movenet.modelType.LIGHTNING, modelUrl:'model/model.json'}
+    );
+  }catch(e){
+    showErr('模型加载失败：'+e.message+'<br>模型已内置在 model/ 文件夹，若加载失败请确认 model/model.json 与两个 .bin 文件已完整上传。');
+    return;
+  }
+  await startCam();
+  document.getElementById('loading').style.display='none';
+  requestAnimationFrame(loop);
+}
+async function startCam(){
+  if(stream)stream.getTracks().forEach(t=>t.stop());
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:facing,width:{ideal:640},height:{ideal:480}},audio:false});
+    video.srcObject=stream; await video.play();
+    mirror=(facing==='user'); video.style.transform=mirror?'scaleX(-1)':'none';
+  }catch(e){
+    document.getElementById('err').style.display='flex';
+    document.getElementById('err').innerHTML='⚠️ 无法访问摄像头：'+e.message+
+      '<br>请在浏览器弹窗中点击「允许」，并确保页面通过 <code>https://</code> 打开。';
+  }
+}
+function flipCam(){facing=facing==='user'?'environment':'user';startCam();}
+function fitCanvas(){
+  const r=video.getBoundingClientRect();
+  const w=Math.round(r.width),h=Math.round(r.height);
+  if(w>0&&h>0&&(canvas.width!==w||canvas.height!==h)){canvas.width=w;canvas.height=h;}
+}
+setInterval(fitCanvas,200);
+
+// ===================== 指标区（按模式渲染）=====================
+function renderMetrics(){
+  const g=document.getElementById('grid');
+  if(mode==='situp'){
+    g.innerHTML=`
+      <div class="metric"><div class="v" id="mv0">--</div><div class="k">机位</div></div>
+      <div class="metric"><div class="v" id="mv1">--</div><div class="k">起身角</div></div>
+      <div class="metric"><div class="v" id="mv2">0</div><div class="k">计数</div></div>
+      <div class="metric"><div class="v" id="mv3">--</div><div class="k">剩余秒</div></div>
+      <div class="metric"><div class="v" id="mv4">--</div><div class="k">状态</div></div>
+      <div class="metric"><div class="v" id="mv5">--</div><div class="k">最佳起身角</div></div>`;
+  } else {
+    g.innerHTML=`
+      <div class="metric"><div class="v" id="mv0">--</div><div class="k">机位</div></div>
+      <div class="metric"><div class="v" id="mv1">--</div><div class="k">屈膝角</div></div>
+      <div class="metric"><div class="v" id="mv2">--</div><div class="k">髋角</div></div>
+      <div class="metric"><div class="v" id="mv3">--</div><div class="k">起跳膝角</div></div>
+      <div class="metric"><div class="v" id="mv4">--</div><div class="k">蓄力膝角</div></div>
+      <div class="metric"><div class="v" id="mv5">0</div><div class="k">有效动作</div></div>`;
+  }
+  if(mode==='situp') updateSitUI();
+  const show = mode==='jump';
+  document.getElementById('profile').style.display = show?'flex':'none';
+  document.getElementById('report').style.display = show?'block':'none';
+  if(show) buildReport();
+}
+
+// ===================== 交互 =====================
+function setMode(m){
+  mode=m;
+  document.getElementById('mJump').classList.toggle('on',m==='jump');
+  document.getElementById('mSit').classList.toggle('on',m==='situp');
+  document.getElementById('testbar').style.display = m==='situp'?'flex':'none';
+  renderMetrics(); resetAll();
+}
+function toggle(k){
+  if(k==='skel'){showSkeleton=!showSkeleton;document.getElementById('bSkel').classList.toggle('on',showSkeleton);}
+  if(k==='lbl'){showLabels=!showLabels;document.getElementById('bLbl').classList.toggle('on',showLabels);}
+  if(k==='pause'){paused=!paused;document.getElementById('bPause').classList.toggle('on',paused);
+    document.getElementById('bPause').textContent=paused?'继续':'暂停';}
+}
+function resetAll(){
+  eventCount=0;lastEvent=0;
+  sm={phase:'idle',kneeMin:180,liftPos:null,crouchKnee:180,lastWristY:null,riseT:0,takeoffKnee:null,airHipY:0,airT:0};
+  jstat={n:0,sumC:0,sumT:0,notExt:0,shallow:0};
+  pending=null;
+  sit={phase:'idle',state:'down',count:0,timer:null,left:0,prepLeft:0,bestUp:90};
+  if(sit.timer)clearInterval(sit.timer);
+  document.getElementById('log').innerHTML='';
+  document.getElementById('diag').textContent = mode==='situp'
+    ? '仰卧起坐模式：平躺让肩、髋入镜，起身坐直即可自动计数。点「开始 1 分钟」：先有 10 秒准备缓冲，语音说「开始」后才正式计时。'
+    : '已重置。把身体完整放进画面即可重新开始。';
+  records=[];
+  if(mode==='situp') updateSitUI();
+  if(mode==='jump') buildReport();
+}
+function snap(){
+  const c=document.createElement('canvas');c.width=video.videoWidth;c.height=video.videoHeight;
+  const x=c.getContext('2d');x.drawImage(video,0,0);x.drawImage(canvas,0,0,c.width,c.height);
+  const a=document.createElement('a');a.download='AI运动分析_'+Date.now()+'.png';a.href=c.toDataURL();a.click();
+}
+
+renderMetrics();
+bindProfile();
+init();
+</script>
+</body>
+</html>
